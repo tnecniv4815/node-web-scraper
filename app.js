@@ -108,10 +108,18 @@ exports.handler = async (event, context, callback) => {
         const news = extractListFromHtml(scrapeResult);
         // console.log('news_length: ', news.length);
 
+        console.log('Scrape completed. news length: ', news.length);
+
         if (news.length > 0) {
-            const tmpList = _.drop(news, Math.max(0, news.length-3));
+            // const tmpList = _.drop(news, Math.max(0, news.length-10));
+            const tmpList = news;
 
             handlerResult = tmpList;
+
+            // console.log('news length: ', tmpList.length);
+            // console.log(JSON.stringify(tmpList));
+
+
 
             // insert news into S3 (article)
             const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3Articles);
@@ -138,29 +146,30 @@ exports.handler = async (event, context, callback) => {
                 }
             }
 
-            // insert news into S3 (article link)
-            const listLinkBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks);
-            if (listLinkBucketResult != null) {
-                console.log('listLinkBucketResult_success');
+            // // insert news into S3 (article link)
+            // const listLinkBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks);
+            // if (listLinkBucketResult != null) {
+            //     console.log('listLinkBucketResult_success');
+            //
+            //     for (const newsObj of tmpList) {
+            //         const filename = newsObj.title + '.' + fileExtension;
+            //         const fullPath = s3ArticleLinks + '/' + filename;
+            //
+            //         const isFound = isFileExistInS3Bucket(listLinkBucketResult, fullPath);
+            //         console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
+            //         if (!isFound) {
+            //             const newsJsonStr = JSON.stringify(newsObj);
+            //
+            //             const createLinkObjResult = await createObjectInS3Bucket(articleBucketName, s3ArticleLinks, filename, newsJsonStr);
+            //             if (createLinkObjResult != null) {
+            //                 console.log('Create file in S3 bucket: ', filename, ' path: ', s3ArticleLinks);
+            //             }
+            //
+            //         }
+            //     }
+            // }
 
-                for (const newsObj of tmpList) {
-                    const filename = newsObj.title + '.' + fileExtension;
-                    const fullPath = s3ArticleLinks + '/' + filename;
 
-                    const isFound = isFileExistInS3Bucket(listLinkBucketResult, fullPath);
-                    console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
-                    if (!isFound) {
-                        const newsJsonStr = JSON.stringify(newsObj);
-
-                        const createLinkObjResult = await createObjectInS3Bucket(articleBucketName, s3ArticleLinks, filename, newsJsonStr);
-                        if (createLinkObjResult != null) {
-                            console.log('Create file in S3 bucket: ', filename, ' path: ', s3ArticleLinks);
-                        }
-
-                    }
-                }
-
-            }
         }
     }
 
@@ -342,6 +351,14 @@ function getCurrentTime() {
     return datetime;
 }
 
+function replaceAll(str, search, replacement) {
+    let newStr = '';
+    if (_.isString(str)) { // maybe add a lodash test? Will not handle numbers now.
+        newStr = str.split(search).join(replacement)
+    }
+    return newStr;
+}
+
 
 /**
  * Scraping
@@ -355,7 +372,9 @@ function extractListFromHtml(html) {
     const dataRows = $('.GN-lbox2B');
 
     _.forEach(dataRows, (element) => {
-        const title = $(element).find('.GN-lbox2D a').text().trim();
+        const tmpTitle = $(element).find('.GN-lbox2D a').text().trim();
+        const title = replaceAll(tmpTitle, '/', ' ')
+
         const thumbnail = $(element).find('.GN-lbox2E img').attr('src');
         const link = 'https:' + $(element).find('.GN-lbox2E a').attr('href');
 
