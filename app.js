@@ -26,6 +26,8 @@ const s3Media = 'media';
 
 exports.handler = async (event, context, callback) => {
 
+    let handlerResult;
+
     console.log('Loading...');
 
     console.log('Start scraping data');
@@ -57,9 +59,17 @@ exports.handler = async (event, context, callback) => {
     //         console.log('createObjectInS3Bucket_err: ', err);
     //     });
 
+    // createObjectInS3Bucket(articleBucketName, s3Articles, 'good.json', response)
+    //     .then(data => {
+    //         console.log('createObjectInS3Bucket_success: ', data);
+    //     })
+    //     .catch(err => {
+    //         console.log('createObjectInS3Bucket_err: ', err);
+    //     });
 
 
-
+    // const result = await createObjectInS3Bucket(articleBucketName, s3Articles, 'good.json', response);
+    // console.log('createObjectInS3Bucket_result: ', result);
 
 
 
@@ -91,10 +101,76 @@ exports.handler = async (event, context, callback) => {
 
 
 
+    const scrapeResult = await rp(url);
+    // console.log('scrapeResult: ', scrapeResult.length);
+
+    if (scrapeResult != null && scrapeResult.length > 0) {
+        const news = extractListFromHtml(scrapeResult);
+        // console.log('news_length: ', news.length);
+
+        if (news.length > 0) {
+            const tmpList = _.drop(news, Math.max(0, news.length-3));
+
+            handlerResult = tmpList;
+
+            // insert news into S3 (article)
+            const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3Articles);
+            if (listBucketResult != null) {
+                console.log('listS3BucketsDirectories_success');
+
+                for (const newsObj of tmpList) {
+                    const filename = newsObj.title + '.' + fileExtension;
+                    const fullPath = s3Articles + '/' + filename;
+
+                    // console.log(listBucketResult);
+
+                    const isFound = isFileExistInS3Bucket(listBucketResult, fullPath);
+                    console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
+                    if (!isFound) {
+                        const newsJsonStr = JSON.stringify(newsObj);
+
+                        const createObjResult = await createObjectInS3Bucket(articleBucketName, s3Articles, filename, newsJsonStr);
+                        if (createObjResult != null) {
+                            console.log('Create file in S3 bucket: ', filename, ' path: ', s3Articles);
+                        }
+
+                    }
+                }
+            }
+
+            // insert news into S3 (article link)
+            const listLinkBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks);
+            if (listLinkBucketResult != null) {
+                console.log('listLinkBucketResult_success');
+
+                for (const newsObj of tmpList) {
+                    const filename = newsObj.title + '.' + fileExtension;
+                    const fullPath = s3ArticleLinks + '/' + filename;
+
+                    const isFound = isFileExistInS3Bucket(listLinkBucketResult, fullPath);
+                    console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
+                    if (!isFound) {
+                        const newsJsonStr = JSON.stringify(newsObj);
+
+                        const createLinkObjResult = await createObjectInS3Bucket(articleBucketName, s3ArticleLinks, filename, newsJsonStr);
+                        if (createLinkObjResult != null) {
+                            console.log('Create file in S3 bucket: ', filename, ' path: ', s3ArticleLinks);
+                        }
+
+                    }
+                }
+
+            }
+        }
+    }
 
 
 
 
+
+
+
+/*
 
 
 
@@ -163,7 +239,7 @@ exports.handler = async (event, context, callback) => {
 
 
 
-                    const tmpList = _.drop(news, news.length-3);
+                    const tmpList = _.drop(news, Math.max(0, news.length-3));
 
 
 
@@ -175,9 +251,7 @@ exports.handler = async (event, context, callback) => {
                         .then(data => {
                             console.log('listS3BucketsDirectories_data: ', data, '\n\n');
 
-
-                            _.forEach(tmpList, (newsObj) => {
-
+                            for (const newsObj of tmpList) {
                                 const filename = newsObj.title + '.' + fileExtension;
                                 const fullPath = s3Articles + '/' + filename;
 
@@ -195,9 +269,8 @@ exports.handler = async (event, context, callback) => {
                                         });
 
                                 }
+                            }
 
-
-                            });
 
                         })
                         .catch(err => {
@@ -211,9 +284,7 @@ exports.handler = async (event, context, callback) => {
                         .then(data => {
                             console.log('listS3BucketsDirectories_data: ', data, '\n\n');
 
-
-                            _.forEach(tmpList, (newsObj) => {
-
+                            for (const newsObj of tmpList) {
                                 const filename = newsObj.title + '.' + fileExtension;
                                 const fullPath = s3ArticleLinks + '/' + filename;
 
@@ -231,9 +302,7 @@ exports.handler = async (event, context, callback) => {
                                         });
 
                                 }
-
-
-                            });
+                            }
 
                         })
                         .catch(err => {
@@ -251,10 +320,14 @@ exports.handler = async (event, context, callback) => {
                 console.error(err);
             });
 
+        */
 
 
 
 
+
+
+    return handlerResult;
 
 
 };
@@ -390,39 +463,71 @@ function isFileExistInS3Bucket(s3Result, targetFileFullPath) {
 }
 
 function listS3BucketsDirectories(bucketName, directory) {
-    return new Promise ((resolve, reject) => {
-        const s3params = {
-            Bucket: bucketName,
-            MaxKeys: 20,
-            Delimiter: directory,
-        };
-        s3.listObjectsV2 (s3params, (err, data) => {
-            if (err) {
-                reject (err);
-            }
-            resolve (data);
-        });
-    });
+    // return new Promise ((resolve, reject) => {
+    //     const s3params = {
+    //         Bucket: bucketName,
+    //         MaxKeys: 20,
+    //         Delimiter: directory,
+    //     };
+    //     s3.listObjectsV2 (s3params, (err, data) => {
+    //         if (err) {
+    //             reject (err);
+    //         }
+    //         resolve (data);
+    //     });
+    // });
+    const s3params = {
+        Bucket: bucketName,
+        MaxKeys: 20,
+        Delimiter: directory,
+    };
+    return s3.listObjectsV2 (s3params).promise();
 }
 
+// async function createObjectInS3Bucket(bucketName, directory, fileNameWithExt, body) {
+//     return new Promise((resolve, reject) => {
+//         const params = {
+//             Bucket: bucketName,
+//             Key: directory + '/' + fileNameWithExt,
+//             Body: body
+//         };
+//         s3.upload(params, (err, data) => {
+//             if (err) {
+//                 console.log('createObjectInS3Bucket_success error in callback');
+//                 console.log(err);
+//                 reject(err);
+//             }
+//             console.log('createObjectInS3Bucket_success');
+//             console.log(data);
+//             resolve(data);
+//         });
+//     });
+// }
+
 function createObjectInS3Bucket(bucketName, directory, fileNameWithExt, body) {
-    return new Promise((resolve, reject) => {
-        const params = {
-            Bucket: bucketName,
-            Key: directory + '/' + fileNameWithExt,
-            Body: body
-        };
-        s3.upload(params, (err, data) => {
-            if (err) {
-                // console.log('error in callback');
-                // console.log(err);
-                reject(err);
-            }
-            // console.log('success');
-            // console.log(data);
-            resolve(data);
-        });
-    });
+    // return new Promise((resolve, reject) => {
+    //     const params = {
+    //         Bucket: bucketName,
+    //         Key: directory + '/' + fileNameWithExt,
+    //         Body: body
+    //     };
+    //     s3.upload(params, (err, data) => {
+    //         if (err) {
+    //             // console.log('error in callback');
+    //             // console.log(err);
+    //             reject(err);
+    //         }
+    //         // console.log('success');
+    //         // console.log(data);
+    //         resolve(data);
+    //     });
+    // });
+    const params = {
+        Bucket: bucketName,
+        Key: directory + '/' + fileNameWithExt,
+        Body: body
+    };
+    return s3.upload(params).promise();
 }
 
 function deleteObjectInS3Bucket(bucketName, directory, fileNameWithExt) {
