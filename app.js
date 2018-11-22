@@ -42,6 +42,9 @@ const s3 = new AWS.S3();
 const ddb = new AWS.DynamoDB({
     region: region
 });
+const docClient = new AWS.DynamoDB.DocumentClient({
+    region: region
+});
 
 /**
  * Article Detail Lambda function
@@ -431,20 +434,41 @@ exports.articleStoreHandler = async (event, context, callback) => {
                         const thumbnailUrl = s3Media + '/' + filenameWithExt;
                         articleObj.thumbnailUrl = thumbnailUrl;
 
-                        console.log(articleObj);
+                        // console.log(articleObj);
 
-                        // const body = await fileUrlToData(imgUrl);
-                        // if (body != null) {
-                        //
-                        // }
+                        const body = await fileUrlToData(imgUrl);
+                        if (body != null) {
+                            const dbObj = await findOneArticleFromDynamoDB(articleObj.title);
+                            if (_.isEmpty(dbObj)) {
 
-                        // const writeArticleResult = await writeArticleToDynamoDB(articleObj);
-                        // console.log('writeArticleResult: ', writeArticleResult);
 
-                        // const dbObj = await findOneArticleFromDynamoDB(articleObj.title);
-                        // console.log('dbObj: ', JSON.stringify(dbObj));
+                                // save image to S3
+                                const createMediaFileResult = await createObjectInS3Bucket(articleBucketName, s3Media, filenameWithExt, body);
+                                console.log('createMediaFileResult: ', createMediaFileResult);
+
+                                // insert data to db
+                                const writeArticleResult = await writeArticleToDynamoDB(articleObj);
+                                console.log('writeArticleResult: ', writeArticleResult);
+
+                                if (!_.isEmpty(createMediaFileResult) && !_.isEmpty(writeArticleResult)) {
+                                    // move json from article to article link
+
+                                }
+
+
+                            } else {
+                                console.log('has record: ', JSON.stringify(dbObj));
+                            }
+                        }
+
+
+
+
+
                         // console.log('dbObj123123: ', dbObj.Item.thumbnailUrl.S);
 
+                        // const aaa = await fetchItems(articleObj.title);
+                        // console.log('aaa: ', aaa);
 
 
                     }
@@ -755,6 +779,22 @@ function findOneArticleFromDynamoDB(articleTitle) {
     };
     return ddb.getItem(params).promise();
 }
+
+// function fetchItems(articleTitle) {
+//     const params = {
+//         TableName: articleTableName,
+//         KeyConditionExpression:"#title = :titleValue ",
+//         ExpressionAttributeNames: {
+//             "#title":"title"
+//         },
+//         ExpressionAttributeValues: {
+//             ":titleValue":articleTitle,
+//         }
+//     };
+//     docClient.query(params).promise();
+// }
+
+
 
 // function queryArticleFromDynamoDB(articleTitle) {
 //     const params = {
