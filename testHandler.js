@@ -2,7 +2,15 @@
 console.log('init.....');
 
 const app = require('./app');
-const data = app.handler({});
+let data;
+
+
+// data = app.articleHandler({});
+data = app.articleStoreHandler({});
+// data = app.articleDetailHandler({});
+// data = app.detailStoreHandler({});
+
+
 console.log('data: ', JSON.stringify(data));
 
 // const _ = require('lodash');

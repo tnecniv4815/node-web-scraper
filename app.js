@@ -1,30 +1,81 @@
+const AWS = require('aws-sdk');
 const rp = require('request-promise');
 const cheerio = require('cheerio');
 const _ = require('lodash');
 const moment = require('moment');
+const request = require('request');
+// const Url = require('url');
+// const Path = require('path');
+const uuidv5 = require('uuid/v5');
 
-const articleBucketName = 'article-bucket-55895cd0-e240-11e8-8c69-036b726f6b89';
-const region = 'ap-southeast-1';
-const articleLinkQueueName = 'ArticleLinkQueue';
-const articleQueueName = 'ArticleQueue';
-
-const AWS = require('aws-sdk');
-const sqs = new AWS.SQS({
-    region: region
-});
-const s3 = new AWS.S3();
 
 
 //
 const url = 'https://gnn.gamer.com.tw/index.php?k=';
 
 const fileExtension = 'json';
+
+const region = 'ap-southeast-1';
+
+// S3 bucket
+const articleBucketName = 'article-bucket-55895cd0-e240-11e8-8c69-036b726f6b89';
+
+// S3
 const s3Articles = 'articles';
 const s3ArticleLinks = 'articleLink';
 const s3ArticleDetail = 'articleDetail';
 const s3Media = 'media';
 
-exports.handler = async (event, context, callback) => {
+// SQS
+const articleLinkQueueName = 'ArticleLinkQueue';
+const articleQueueName = 'ArticleQueue';
+
+// DynamoDB
+const articleTableName = 'article';
+const articleDetailTableName = 'articleDetail';
+
+// AWS
+const sqs = new AWS.SQS({
+    region: region
+});
+const s3 = new AWS.S3();
+const ddb = new AWS.DynamoDB({
+    region: region
+});
+
+/**
+ * Article Detail Lambda function
+ */
+exports.articleDetailHandler = async (event, context, callback) => {
+    let handlerResult;
+    console.log('Loading...');
+    console.log('Start scraping detail');
+
+    handlerResult = {
+        result: 'detailHandler'
+    };
+
+    return handlerResult;
+};
+
+/**
+ * Article Detail Store Lambda function
+ */
+exports.detailStoreHandler = async (event, context, callback) => {
+    let handlerResult;
+    console.log('Loading...');
+
+    handlerResult = {
+        result: 'detailStoreHandler'
+    };
+
+    return handlerResult;
+};
+
+/**
+ * Article Lambda function
+ */
+exports.articleHandler = async (event, context, callback) => {
 
     let handlerResult;
 
@@ -342,6 +393,73 @@ exports.handler = async (event, context, callback) => {
 };
 
 /**
+ * Article Store Lambda function
+ */
+exports.articleStoreHandler = async (event, context, callback) => {
+    let handlerResult;
+    console.log('Loading...');
+    console.log('articleStoreHandler');
+
+
+    handlerResult = {
+        result: 'articleStoreHandler'
+    };
+
+
+    const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3Articles);
+    if (listBucketResult != null) {
+        const s3ResultList = getContentListFromBucketResult(listBucketResult);
+        if (!_.isNull(s3ResultList) && s3ResultList.length > 0) {
+            console.log('s3ResultList: ', s3ResultList.length);
+            // console.log('s3ResultList: ', s3ResultList);
+
+            const tmpList = _.drop(s3ResultList, Math.max(0, s3ResultList.length-3));
+
+            for (const s3ResultObj of tmpList) {
+                // console.log(s3ResultObj.Key);
+
+                const s3DataObj = await getS3Object(articleBucketName, s3ResultObj.Key);
+                if (s3DataObj != null) {
+                    const dataStr = s3DataObj.Body.toString();
+                    const articleObj = JSON.parse(dataStr);
+                    if (!_.isNull(articleObj)) {
+                        const imgUrl = articleObj.thumbnail;
+
+                        const filename = uuidv5(imgUrl, uuidv5.URL);
+                        const ext = getExtensionFromurl(imgUrl);
+                        const filenameWithExt = filename + '.' + ext;
+                        const thumbnailUrl = s3Media + '/' + filenameWithExt;
+                        articleObj.thumbnailUrl = thumbnailUrl;
+
+                        console.log(articleObj);
+
+                        // const body = await fileUrlToData(imgUrl);
+                        // if (body != null) {
+                        //
+                        // }
+
+                        // const writeArticleResult = await writeArticleToDynamoDB(articleObj);
+                        // console.log('writeArticleResult: ', writeArticleResult);
+
+                        // const dbObj = await findOneArticleFromDynamoDB(articleObj.title);
+                        // console.log('dbObj: ', JSON.stringify(dbObj));
+                        // console.log('dbObj123123: ', dbObj.Item.thumbnailUrl.S);
+
+
+
+                    }
+                }
+
+            }
+
+        }
+    }
+
+
+    return handlerResult;
+};
+
+/**
  * Common
  */
 function getCurrentTime() {
@@ -351,12 +469,47 @@ function getCurrentTime() {
     return datetime;
 }
 
+function getExtensionFromurl(url) {
+    let extension = '';
+
+    // console.log('getExtensionFromurl: ', url);
+
+    if (!_.isNull(url) && url !== '') {
+        // extension = Path.extname(Url.parse(url).pathname).replace('.', '');
+
+        const array = url.split('.');
+        if (array != null && array.length > 0) {
+            extension = array[array.length-1];
+        }
+
+    }
+
+    // console.log('getExtensionFromurl: ', extension);
+    return extension;
+}
+
 function replaceAll(str, search, replacement) {
     let newStr = '';
     if (_.isString(str)) { // maybe add a lodash test? Will not handle numbers now.
         newStr = str.split(search).join(replacement)
     }
     return newStr;
+}
+
+function fileUrlToData(url) {
+    return new Promise((resolve, reject) => {
+        if (url !== '') {
+            request.get({
+                url: url,
+                encoding: null
+            }, (err, response, body) => {
+                if (err) {
+                    reject(err);
+                }
+                resolve(body);
+            });
+        }
+    });
 }
 
 
@@ -373,7 +526,8 @@ function extractListFromHtml(html) {
 
     _.forEach(dataRows, (element) => {
         const tmpTitle = $(element).find('.GN-lbox2D a').text().trim();
-        const title = replaceAll(tmpTitle, '/', ' ')
+        let title = replaceAll(tmpTitle, '/', ' ');
+        title = replaceAll(title, '"', '\"');
 
         const thumbnail = $(element).find('.GN-lbox2E img').attr('src');
         const link = 'https:' + $(element).find('.GN-lbox2E a').attr('href');
@@ -456,6 +610,23 @@ function addMessageToSQSQueue(queueUrl, message) {
     })
 }
 
+
+/**
+ * support function for S3
+ */
+
+
+function getContentListFromBucketResult(s3Result) {
+    let list = [];
+
+    const contents = s3Result.Contents;
+    if (!_.isNull(contents) && contents.length > 0) {
+        list = contents;
+    }
+
+    return list;
+}
+
 /**
  * S3 Bucket
  */
@@ -482,25 +653,27 @@ function isFileExistInS3Bucket(s3Result, targetFileFullPath) {
 }
 
 function listS3BucketsDirectories(bucketName, directory) {
-    // return new Promise ((resolve, reject) => {
-    //     const s3params = {
-    //         Bucket: bucketName,
-    //         MaxKeys: 20,
-    //         Delimiter: directory,
-    //     };
-    //     s3.listObjectsV2 (s3params, (err, data) => {
-    //         if (err) {
-    //             reject (err);
-    //         }
-    //         resolve (data);
-    //     });
-    // });
     const s3params = {
         Bucket: bucketName,
         MaxKeys: 20,
         Delimiter: directory,
     };
     return s3.listObjectsV2 (s3params).promise();
+}
+
+function getS3Object(bucketName, key) {
+    return new Promise((resolve, reject) => {
+        const params = {
+            Bucket: bucketName,
+            Key: key
+        };
+        s3.getObject(params, function(err, data) {
+            if (err) {
+                reject(err);
+            }
+            resolve(data);
+        });
+    });
 }
 
 // async function createObjectInS3Bucket(bucketName, directory, fileNameWithExt, body) {
@@ -550,27 +723,54 @@ function createObjectInS3Bucket(bucketName, directory, fileNameWithExt, body) {
 }
 
 function deleteObjectInS3Bucket(bucketName, directory, fileNameWithExt) {
-    return new Promise((resolve, reject) => {
-        const params = {
-            Bucket: bucketName,
-            Key: directory + '/' + fileNameWithExt
-        };
-        s3.deleteObject(params, function(err, data) {
-            if (err) {
-                // console.log(err, err.stack);
-                reject(err)
-            }
-            else     console.log(data);           // successful response
-            /*
-            data = {
-            }
-            */
-        });
-    });
+    const params = {
+        Bucket: bucketName,
+        Key: directory + '/' + fileNameWithExt
+    };
+    return s3.deleteObject(params).promise();
 }
 
-
 /**
- *
+ * DynamoDB
  */
+function writeArticleToDynamoDB(articleObj) {
+    const params = {
+        TableName: articleTableName,
+        Item: {
+            // 'CUSTOMER_ID': {N: '001'},
+            'title' : {S: articleObj.title},
+            'thumbnailUrl' : {S: articleObj.thumbnailUrl},
+        }
+    };
+    return ddb.putItem(params).promise();
+}
+
+function findOneArticleFromDynamoDB(articleTitle) {
+    const params = {
+        TableName : articleTableName,
+        Key: {
+            'title' : {S: articleTitle},
+        },
+        ProjectionExpression: 'title, thumbnailUrl'
+    };
+    return ddb.getItem(params).promise();
+}
+
+// function queryArticleFromDynamoDB(articleTitle) {
+//     const params = {
+//         TableName : articleTableName,
+//         ProjectionExpression:"title, thumbnailUrl",
+//         // KeyConditionExpression: "#yr = :yyyy and title between :letter1 and :letter2",
+//         // ExpressionAttributeNames:{
+//         //     "#yr": "year"
+//         // },
+//         // ExpressionAttributeValues: {
+//         //     ":yyyy": 1992,
+//         //     ":letter1": "A",
+//         //     ":letter2": "L"
+//         // }
+//     };
+//
+//     return ddb.query(params).promise();
+// }
 
