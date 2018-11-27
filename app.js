@@ -8,7 +8,7 @@ const request = require('request');
 // const Path = require('path');
 const uuidv5 = require('uuid/v5');
 // const async = require('async');
-
+const crypto = require('crypto-js');
 
 //
 const url = 'https://gnn.gamer.com.tw/index.php?k=';
@@ -178,6 +178,16 @@ exports.articleHandler = async (event, context, callback) => {
             // console.log(JSON.stringify(tmpList));
 
 
+            // testing
+            // for (const newsObj of tmpList) {
+            //     const filename = newsObj.title + '.' + fileExtension;
+            //     const md5 = crypto.MD5(newsObj.title).toString();
+            //
+            //     console.log(`md5: ${md5} , name: ${newsObj.title}`);
+            // }
+
+
+
 
             // insert news into S3 (article)
             const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3Articles);
@@ -185,7 +195,7 @@ exports.articleHandler = async (event, context, callback) => {
                 console.log('listS3BucketsDirectories_success');
 
                 for (const newsObj of tmpList) {
-                    const filename = newsObj.title + '.' + fileExtension;
+                    const filename = crypto.MD5(newsObj.title).toString() + '.' + fileExtension;
                     const fullPath = s3Articles + '/' + filename;
 
                     // console.log(listBucketResult);
@@ -203,6 +213,7 @@ exports.articleHandler = async (event, context, callback) => {
                     }
                 }
             }
+
 
             // // insert news into S3 (article link)
             // const listLinkBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks);
@@ -469,26 +480,35 @@ exports.articleStoreHandler = async (event, context, callback) => {
                             const dbObj = await findOneArticleFromDynamoDB(articleObj.title);
                             if (_.isEmpty(dbObj)) {
 
+                                // move json from article to article link
+                                const filename = crypto.MD5(articleObj.title).toString() + '.' + fileExtension;
+                                const srcPath = s3Articles;
+                                const destPath = s3ArticleLinks;
 
-                                // save image to S3
-                                const createMediaFileResult = await createObjectInS3Bucket(articleBucketName, s3Media, filenameWithExt, body);
-                                console.log('createMediaFileResult: ', createMediaFileResult);
+                                console.log(`Start moving file, name: ${filename} from ${srcPath} to ${destPath}`);
 
-                                // insert data to db
-                                const writeArticleResult = await writeArticleToDynamoDB(articleObj);
-                                console.log('writeArticleResult: ', writeArticleResult);
+                                const moveObj = await moveObjectInS3Bucket(articleBucketName, srcPath, destPath, filename);
+                                if (moveObj != null) {
+                                    console.log(`MOVE success ${filename} from ${srcPath} to ${destPath}`);
 
-                                if (!_.isEmpty(createMediaFileResult) && !_.isEmpty(writeArticleResult)) {
-                                    // move json from article to article link
-                                    const filename = articleObj.title;
-                                    const srcPath = s3Articles;
-                                    const destPath = s3ArticleLinks;
-
-                                    const moveObj = await moveObjectInS3Bucket(articleBucketName, srcPath, destPath, filename);
-                                    if (moveObj != null) {
-                                        console.log(`MOVE success ${filename} from ${srcPath} to ${destPath}`);
+                                    // save image to S3
+                                    const createMediaFileResult = await createObjectInS3Bucket(articleBucketName, s3Media, filenameWithExt, body);
+                                    if (createMediaFileResult != null) {
+                                        console.log('Create media file success: ', createMediaFileResult);
                                     }
+                                    // console.log('createMediaFileResult: ', createMediaFileResult);
+
+                                    // insert data to db
+                                    const writeArticleResult = await writeArticleToDynamoDB(articleObj);
+                                    if (!_.isEmpty(writeArticleResult)) {
+                                        // console.log('writeArticleResult: ', writeArticleResult);
+                                        console.log('Insert new record into DynamoDB success: ', writeArticleResult);
+                                    }
+
+
                                 }
+
+
 
                             } else {
                                 console.log('has record: ', JSON.stringify(dbObj));
