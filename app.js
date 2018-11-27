@@ -7,7 +7,7 @@ const request = require('request');
 // const Url = require('url');
 // const Path = require('path');
 const uuidv5 = require('uuid/v5');
-
+// const async = require('async');
 
 
 //
@@ -155,6 +155,10 @@ exports.articleHandler = async (event, context, callback) => {
 
 
 
+
+
+
+
     const scrapeResult = await rp(url);
     // console.log('scrapeResult: ', scrapeResult.length);
 
@@ -226,6 +230,10 @@ exports.articleHandler = async (event, context, callback) => {
 
         }
     }
+
+
+
+
 
 
 
@@ -408,6 +416,26 @@ exports.articleStoreHandler = async (event, context, callback) => {
         result: 'articleStoreHandler'
     };
 
+    /*
+    const filename = 'hello.json';
+    const srcPath = s3Articles;
+    const destPath = s3ArticleLinks;
+
+    const moveObj = await moveObjectInS3Bucket(articleBucketName, srcPath, destPath, filename);
+    if (moveObj != null) {
+        console.log(`MOVE success ${filename} from ${srcPath} to ${destPath}`);
+    }
+    */
+
+
+
+    // Promise.all([
+    //     takes2Seconds(callbackhandler), takes5Seconds(callbackhandler)
+    // ]).then(result => {
+    //     console.log('final: ', result);
+    // });
+
+
 
     const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3Articles);
     if (listBucketResult != null) {
@@ -452,9 +480,15 @@ exports.articleStoreHandler = async (event, context, callback) => {
 
                                 if (!_.isEmpty(createMediaFileResult) && !_.isEmpty(writeArticleResult)) {
                                     // move json from article to article link
+                                    const filename = articleObj.title;
+                                    const srcPath = s3Articles;
+                                    const destPath = s3ArticleLinks;
 
+                                    const moveObj = await moveObjectInS3Bucket(articleBucketName, srcPath, destPath, filename);
+                                    if (moveObj != null) {
+                                        console.log(`MOVE success ${filename} from ${srcPath} to ${destPath}`);
+                                    }
                                 }
-
 
                             } else {
                                 console.log('has record: ', JSON.stringify(dbObj));
@@ -478,6 +512,7 @@ exports.articleStoreHandler = async (event, context, callback) => {
 
         }
     }
+
 
 
     return handlerResult;
@@ -746,13 +781,73 @@ function createObjectInS3Bucket(bucketName, directory, fileNameWithExt, body) {
     return s3.upload(params).promise();
 }
 
-function deleteObjectInS3Bucket(bucketName, directory, fileNameWithExt) {
+function deleteObjectInS3Bucket(bucketName, sourcePath, fileNameWithExt) {
     const params = {
         Bucket: bucketName,
-        Key: directory + '/' + fileNameWithExt
+        Key: sourcePath + '/' + fileNameWithExt
     };
     return s3.deleteObject(params).promise();
 }
+
+function copyObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt) {
+    const params = {
+        Bucket: bucketName + '/' + destPath,   // destinationbucket
+        CopySource: bucketName + '/' + sourcePath + '/' + fileNameWithExt,  // /sourcebucket/HappyFacejpg
+        Key: fileNameWithExt   // HappyFaceCopyjpg
+    };
+    console.log('copyObjectInS3Bucket_param: ', params);
+    return s3.copyObject(params).promise();
+}
+
+function moveObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt) {
+    // return new Promise((resolve, reject) => {
+    //     async.series([
+    //         // copyObjectInS3Bucket(bucketName, sourcePath, destPath, newFileNameWithExt),
+    //         // deleteObjectInS3Bucket(bucketName, sourcePath, newFileNameWithExt)
+    //         takes2Seconds(callbackhandler),
+    //         takes5Seconds(callbackhandler)
+    //     ], (err, result) => {
+    //         if (err) {
+    //             reject(err);
+    //         }
+    //         resolve(result);
+    //     });
+    // });
+
+    return new Promise( async (resolve, reject) => {
+        const copyResult = await copyObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt);
+        console.log('moveObjectInS3Bucket_copyResult: ', copyResult);
+        if (copyResult != null) {
+            const delResult = await deleteObjectInS3Bucket(bucketName, sourcePath, fileNameWithExt);
+            console.log('moveObjectInS3Bucket_delResult: ', delResult);
+            if (delResult != null) {
+                resolve('done');
+            }
+            reject(delResult);
+        }
+        reject(copyResult);
+    });
+}
+
+// function callbackhandler(err, results) {
+//     console.log('It came back with this ' + results);
+// }
+//
+// function takes5Seconds(callback) {
+//     console.log('Starting 5 second task');
+//     setTimeout( function() {
+//         console.log('Just finshed 5 seconds');
+//         callback(null, 'five');
+//     }, 5000);
+// }
+//
+// function takes2Seconds(callback) {
+//     console.log('Starting 2 second task');
+//     setTimeout( function() {
+//         console.log('Just finshed 2 seconds');
+//         callback(null, 'two');
+//     }, 2000);
+// }
 
 /**
  * DynamoDB
@@ -779,6 +874,9 @@ function findOneArticleFromDynamoDB(articleTitle) {
     };
     return ddb.getItem(params).promise();
 }
+
+
+
 
 // function fetchItems(articleTitle) {
 //     const params = {
