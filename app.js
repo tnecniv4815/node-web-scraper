@@ -89,14 +89,14 @@ exports.articleDetailHandler = async (event, context, callback) => {
                         if (!_.isNull(articleDetailLink)) {
                             const scrapeResult = await rp(articleDetailLink);
                             if (scrapeResult != null && scrapeResult.length > 0) {
-                                const newsDetailContents = extractArticleDetailFromHtml(scrapeResult);
-                                console.log(`Scrape completed. content length: ${newsDetailContents.length} , title: ${articleObj.title}` );
+                                const newsDetailObj = extractArticleDetailFromHtml(scrapeResult, articleObj.title);
+                                console.log(`Scrape completed. content length: ${newsDetailObj.contents.length} , title: ${articleObj.title}` );
                                 // console.log('contents: ', JSON.stringify(newsDetailContents));
 
-                                if (newsDetailContents.length === 0) {
+                                if (newsDetailObj.contents.length === 0) {
                                     // drop this article
-                                } else if (newsDetailContents.length > 0) {
-                                    handlerResult = newsDetailContents;
+                                } else if (newsDetailObj.contents.length > 0) {
+                                    handlerResult = newsDetailObj;
 
 
                                     const filename = crypto.MD5(articleObj.title).toString() + '.' + fileExtension;
@@ -104,7 +104,7 @@ exports.articleDetailHandler = async (event, context, callback) => {
 
                                     const isFound = isFileExistInS3Bucket(listBucketResult, fullPath);
                                     if (!isFound) {
-                                        const jsonStr = JSON.stringify(newsDetailContents);
+                                        const jsonStr = JSON.stringify(newsDetailObj);
                                         // console.log(`jsonStr: ${jsonStr}`);
 
                                         // insert news detail into S3 (article detail)
@@ -173,6 +173,58 @@ exports.detailStoreHandler = async (event, context, callback) => {
     handlerResult = {
         result: 'detailStoreHandler'
     };
+
+
+    const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleDetail);
+    if (listBucketResult != null) {
+        const s3ResultList = getContentListFromBucketResult(listBucketResult);
+        if (!_.isNull(s3ResultList) && s3ResultList.length > 0) {
+            console.log('s3ResultList: ', s3ResultList.length);
+
+            // const tmpList = trimResultList(s3ResultList, 3);
+            const tmpList = s3ResultList;
+
+            console.log('s3ResultList: ', s3ResultList);
+
+            for (const s3ResultObj of tmpList) {
+                if (s3ResultObj.Key.indexOf(s3ArticleDetail) > -1) {
+                    const s3DataObj = await getS3Object(articleBucketName, s3ResultObj.Key);
+                    if (s3DataObj != null) {
+                        const dataStr = s3DataObj.Body.toString();
+                        const detailObj = JSON.parse(dataStr);
+                        if (isNotNullAndEmptyAndUndefined(detailObj) && detailObj.contents.length > 0) {
+                            // query article from dynamoDB
+                            // update article table contents [articleDetailObjId, articleDetailObjId]
+                            // insert article detail table, articleObjId
+
+                            const dbObj = await findOneArticleFromDynamoDB(detailObj.title);
+                            if (!_.isEmpty(dbObj)) {
+                                console.log(`dbObj: ${dbObj}`);
+                            }
+
+                            // const dbObj = await findOneArticleFromDynamoDB(articleObj.title);
+                            // if (_.isEmpty(dbObj)) {
+                            //
+                            // }
+                            //
+                            // _.forEach(contentsArray, (content) => {
+                            //     switch (content.type) {
+                            //         case ARTICLE_CONTENT_TYPE.TEXT: {
+                            //             break;
+                            //         }
+                            //         case ARTICLE_CONTENT_TYPE.IMAGE: {
+                            //             break;
+                            //         }
+                            //     }
+                            // });
+                        }
+
+                    }
+                }
+            }
+
+        }
+    }
 
     return handlerResult;
 };
@@ -737,7 +789,7 @@ function extractListFromHtml(html) {
     return list;
 }
 
-function extractArticleDetailFromHtml(html) {
+function extractArticleDetailFromHtml(html, articleTitle) {
     let contents = [];
     const $ = cheerio.load(html);
 
@@ -812,7 +864,12 @@ function extractArticleDetailFromHtml(html) {
     // });
 
 
-    return contents;
+    const result = {
+        title: articleTitle,    // crypto.MD5(articleTitle).toString(),
+        contents: contents
+    };
+
+    return result;
 }
 
 /**
@@ -1086,6 +1143,34 @@ function findOneArticleFromDynamoDB(articleTitle) {
     return ddb.getItem(params).promise();
 }
 
+function updateArticleFromDynamoDB(articleTitle, newContentList) {
+    const params = {
+        TableName: articleTableName,
+        Key:{
+            'title': articleTitle
+        },
+        UpdateExpression: "set contents = :c, articl info.rating = :r, info.plot=:p, info.actors=:a",
+        ExpressionAttributeValues:{
+            ":r":5.5,
+            ":p":"Everything happens all at once.",
+            ":c": newContentList
+        },
+        ReturnValues:"UPDATED_NEW"
+    };
+    // docClient.update(params, function(err, data) {
+    //     if (err) {
+    //         console.error("Unable to update item. Error JSON:", JSON.stringify(err, null, 2));
+    //     } else {
+    //         console.log("UpdateItem succeeded:", JSON.stringify(data, null, 2));
+    //     }
+    // });
+
+    return docClient.update(params).promise();
+}
+
+function writeArticleDetailToDynamoDB() {
+    
+}
 
 
 
