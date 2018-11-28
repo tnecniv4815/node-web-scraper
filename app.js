@@ -46,8 +46,15 @@ const docClient = new AWS.DynamoDB.DocumentClient({
     region: region
 });
 
+
+const ARTICLE_CONTENT_TYPE = {
+    TEXT: 0,
+    IMAGE: 1,
+};
+
+
 /**
- * Article Detail Lambda function
+ * Article Detail Lambda function (Scraper)
  */
 exports.articleDetailHandler = async (event, context, callback) => {
     let handlerResult;
@@ -58,11 +65,106 @@ exports.articleDetailHandler = async (event, context, callback) => {
         result: 'detailHandler'
     };
 
+
+    const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks);
+    if (listBucketResult != null) {
+        const s3ResultList = getContentListFromBucketResult(listBucketResult);
+        // console.log('listS3BucketsDirectories_success: ', listBucketResult);
+
+        if (!_.isNull(s3ResultList) && s3ResultList.length > 0) {
+            // const tmpList = trimResultList(s3ResultList, 3);
+            const tmpList = s3ResultList;
+
+
+            for (const s3ResultObj of tmpList) {
+                if (s3ResultObj.Key.indexOf(s3ArticleLinks) > -1) {
+                    const s3DataObj = await getS3Object(articleBucketName, s3ResultObj.Key);
+                    if (s3DataObj != null) {
+                        const dataStr = s3DataObj.Body.toString();
+                        const articleObj = JSON.parse(dataStr);
+
+                        console.log('articleLinkResult: ', s3ResultObj);
+
+                        const articleDetailLink = articleObj.link;
+                        if (!_.isNull(articleDetailLink)) {
+                            const scrapeResult = await rp(articleDetailLink);
+                            if (scrapeResult != null && scrapeResult.length > 0) {
+                                const newsDetailContents = extractArticleDetailFromHtml(scrapeResult);
+                                console.log(`Scrape completed. content length: ${newsDetailContents.length} , title: ${articleObj.title}` );
+                                // console.log('contents: ', JSON.stringify(newsDetailContents));
+
+                                if (newsDetailContents.length === 0) {
+                                    // drop this article
+                                } else if (newsDetailContents.length > 0) {
+                                    handlerResult = newsDetailContents;
+
+
+                                    const filename = crypto.MD5(articleObj.title).toString() + '.' + fileExtension;
+                                    const fullPath = s3ArticleDetail + '/' + filename;
+
+                                    const isFound = isFileExistInS3Bucket(listBucketResult, fullPath);
+                                    if (!isFound) {
+                                        const jsonStr = JSON.stringify(newsDetailContents);
+                                        // console.log(`jsonStr: ${jsonStr}`);
+
+                                        // insert news detail into S3 (article detail)
+                                        const createObjResult = await createObjectInS3Bucket(articleBucketName, s3ArticleDetail, filename, jsonStr);
+                                        if (createObjResult != null) {
+                                            console.log('Create file in S3 bucket (Article Detail): ', filename, ' path: ', s3ArticleDetail);
+
+                                            // delete Article Link in S3 if create Article Detail success
+                                            const delResult = await deleteObjectInS3Bucket(articleBucketName, s3ResultObj.Key);
+                                            if (delResult != null) {
+                                                console.log('Deleted file in S3 bucket (Article Link): ', s3ResultObj.Key);
+                                            }
+                                        }
+
+                                    } else {
+                                        console.log('File NOT found in S3 bucket: ', filename, ' path: ', s3ArticleDetail);
+                                    }
+                                }
+
+                            }
+                        }
+
+                    }
+
+                } else {
+                    console.log(`Bucket result NOT match to target directory. target: ${s3ArticleLinks} , actual: ${s3ResultObj.Key}`);
+                }
+
+
+            }
+
+        }
+
+        // for (const newsObj of tmpList) {
+        //     const filename = crypto.MD5(newsObj.title).toString() + '.' + fileExtension;
+        //     const fullPath = s3Articles + '/' + filename;
+        //
+        //     // console.log(listBucketResult);
+        //
+        //     const isFound = isFileExistInS3Bucket(listBucketResult, fullPath);
+        //     console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
+        //     if (!isFound) {
+        //         const newsJsonStr = JSON.stringify(newsObj);
+        //
+        //         const createObjResult = await createObjectInS3Bucket(articleBucketName, s3Articles, filename, newsJsonStr);
+        //         if (createObjResult != null) {
+        //             console.log('Create file in S3 bucket: ', filename, ' path: ', s3Articles);
+        //         }
+        //
+        //     }
+        // }
+    }
+
+
+
     return handlerResult;
 };
 
 /**
- * Article Detail Store Lambda function
+ * Article Detail Store Lambda function (Storing)
  */
 exports.detailStoreHandler = async (event, context, callback) => {
     let handlerResult;
@@ -76,7 +178,7 @@ exports.detailStoreHandler = async (event, context, callback) => {
 };
 
 /**
- * Article Lambda function
+ * Article Lambda function (Scraper)
  */
 exports.articleHandler = async (event, context, callback) => {
 
@@ -209,7 +311,8 @@ exports.articleHandler = async (event, context, callback) => {
                         if (createObjResult != null) {
                             console.log('Create file in S3 bucket: ', filename, ' path: ', s3Articles);
                         }
-
+                    } else {
+                        console.log('File NOT found in S3 bucket: ', filename, ' path: ', s3Articles);
                     }
                 }
             }
@@ -415,7 +518,7 @@ exports.articleHandler = async (event, context, callback) => {
 };
 
 /**
- * Article Store Lambda function
+ * Article Store Lambda function (Storing)
  */
 exports.articleStoreHandler = async (event, context, callback) => {
     let handlerResult;
@@ -455,7 +558,7 @@ exports.articleStoreHandler = async (event, context, callback) => {
             console.log('s3ResultList: ', s3ResultList.length);
             // console.log('s3ResultList: ', s3ResultList);
 
-            const tmpList = _.drop(s3ResultList, Math.max(0, s3ResultList.length-3));
+            const tmpList = trimResultList(s3ResultList, 3);
 
             for (const s3ResultObj of tmpList) {
                 // console.log(s3ResultObj.Key);
@@ -548,6 +651,10 @@ function getCurrentTime() {
     return datetime;
 }
 
+function isNotNullAndEmptyAndUndefined(object) {
+    return ( !_.isNull(object) && !_.isEmpty(object) && !_.isUndefined(object) );
+}
+
 function getExtensionFromurl(url) {
     let extension = '';
 
@@ -630,7 +737,83 @@ function extractListFromHtml(html) {
     return list;
 }
 
+function extractArticleDetailFromHtml(html) {
+    let contents = [];
+    const $ = cheerio.load(html);
 
+    const dataRows = $('.GN-lbox3B div');
+    _.forEach(dataRows, (element) => {
+        // message
+        const tmpTitle = $(element).find('div').text().trim();
+        let title = replaceAll(tmpTitle, '/', ' ');
+        title = replaceAll(title, '"', '\"');
+
+        if (title !== '') {
+
+            const obj = {
+                type: ARTICLE_CONTENT_TYPE.TEXT,
+                content: title
+            };
+
+            contents.push(obj);
+        }
+
+        // image
+        // const img = $(element).find(' img').attr('src');
+
+
+        // ul
+        const liList = $(element).find('.GN-thumbnails');
+        _.forEach(liList, (liElement) => {
+            const photo = $(liElement).find('img').attr('data-src');
+            // console.log('photo: ', photo);
+
+            if (isNotNullAndEmptyAndUndefined(photo)) {
+                const obj = {
+                    type: ARTICLE_CONTENT_TYPE.IMAGE,
+                    content: photo
+                };
+
+                contents.push(obj);
+            }
+
+        });
+
+        // table
+        // const table = $(element).find('.gnn-table');
+
+
+        // iframe
+
+
+
+
+
+        // console.log('message: ', img);
+        // console.log('message: ', JSON.stringify(img));
+    });
+
+
+    // redirect
+
+
+
+    // const dataRows2 = $('.MSG-list8C');
+    // const tmpStr = $(dataRows2).find('div').text().trim();
+    // console.log(`msg: ${tmpStr}`);
+    // console.log(`html: ${html}`);
+
+    // _.forEach(dataRows2, (element) => {
+    //     const tmpTitle = $(element).find('div').text().trim();
+    //     let title = replaceAll(tmpTitle, '/', ' ');
+    //     title = replaceAll(title, '"', '\"');
+    //
+    //     console.log(`msg: ${title}`);
+    // });
+
+
+    return contents;
+}
 
 /**
  * SQS Queue
@@ -809,6 +992,14 @@ function deleteObjectInS3Bucket(bucketName, sourcePath, fileNameWithExt) {
     return s3.deleteObject(params).promise();
 }
 
+function deleteObjectInS3Bucket(bucketName, key) {
+    const params = {
+        Bucket: bucketName,
+        Key: key
+    };
+    return s3.deleteObject(params).promise();
+}
+
 function copyObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt) {
     const params = {
         Bucket: bucketName + '/' + destPath,   // destinationbucket
@@ -932,3 +1123,14 @@ function findOneArticleFromDynamoDB(articleTitle) {
 //     return ddb.query(params).promise();
 // }
 
+
+/**
+ * Temp function
+ */
+function trimResultList(oldList, remainingResultSize) {
+    let list = [];
+    if (!_.isNull(oldList) && oldList.length > 0) {
+        list = _.drop(oldList, Math.max(0, oldList.length-remainingResultSize));
+    }
+    return list;
+}
