@@ -54,7 +54,7 @@ const ARTICLE_CONTENT_TYPE = {
 
 
 /**
- * Article Detail Lambda function (Scraper)
+ * Article Detail (Scraper)
  */
 exports.articleDetailHandler = async (event, context, callback) => {
     let handlerResult;
@@ -89,7 +89,8 @@ exports.articleDetailHandler = async (event, context, callback) => {
                         if (!_.isNull(articleDetailLink)) {
                             const scrapeResult = await rp(articleDetailLink);
                             if (scrapeResult != null && scrapeResult.length > 0) {
-                                const newsDetailObj = extractArticleDetailFromHtml(scrapeResult, articleObj.title);
+                                const articleId = crypto.MD5(articleObj.title).toString();
+                                const newsDetailObj = extractArticleDetailFromHtml(scrapeResult, articleObj.title, articleId);
                                 console.log(`Scrape completed. content length: ${newsDetailObj.contents.length} , title: ${articleObj.title}` );
                                 // console.log('contents: ', JSON.stringify(newsDetailContents));
 
@@ -164,7 +165,7 @@ exports.articleDetailHandler = async (event, context, callback) => {
 };
 
 /**
- * Article Detail Store Lambda function (Storing)
+ * Article Detail Store (Storing)
  */
 exports.detailStoreHandler = async (event, context, callback) => {
     let handlerResult;
@@ -197,26 +198,57 @@ exports.detailStoreHandler = async (event, context, callback) => {
                             // update article table contents [articleDetailObjId, articleDetailObjId]
                             // insert article detail table, articleObjId
 
-                            const dbObj = await findOneArticleFromDynamoDB(detailObj.title);
-                            if (!_.isEmpty(dbObj)) {
+                            // const md5 = crypto.MD5(articleObj.title).toString();
+                            // const dbObj = await findOneArticleFromDynamoDB(md5);
+                            // if (!_.isEmpty(dbObj)) {
+                            //     console.log(`dbObj: ${dbObj}`);
+                            // }
+
+
+                            let tmpArticleDetailIdList = [];
+                            _.forEach(detailObj.contents, (content) => {
+
+                                let articleDetailId = '';
+
+                                switch (content.type) {
+                                    case ARTICLE_CONTENT_TYPE.TEXT: {
+                                        articleDetailId = crypto.MD5(content.content).toString();
+                                        const message = articleDetailId;
+
+
+                                        break;
+                                    }
+                                    case ARTICLE_CONTENT_TYPE.IMAGE: {
+                                        const imgUrl = content.content;
+
+                                        const filename = uuidv5(imgUrl, uuidv5.URL);
+                                        const ext = getExtensionFromurl(imgUrl);
+                                        const filenameWithExt = filename + '.' + ext;
+
+                                        const finalImgUrl = s3Media + '/' + filenameWithExt;
+                                        articleDetailId = filename;
+
+                                        break;
+                                    }
+                                }
+
+                                if (articleDetailId !== '') {
+                                    tmpArticleDetailIdList.push(articleDetailId);
+                                }
+
+                            });
+
+
+
+                            // update content list to article table
+                            const dbObj = await findOneArticleFromDynamoDB(detailObj.articleId);
+                            if (_.isEmpty(dbObj)) {
                                 console.log(`dbObj: ${dbObj}`);
                             }
 
-                            // const dbObj = await findOneArticleFromDynamoDB(articleObj.title);
-                            // if (_.isEmpty(dbObj)) {
-                            //
-                            // }
-                            //
-                            // _.forEach(contentsArray, (content) => {
-                            //     switch (content.type) {
-                            //         case ARTICLE_CONTENT_TYPE.TEXT: {
-                            //             break;
-                            //         }
-                            //         case ARTICLE_CONTENT_TYPE.IMAGE: {
-                            //             break;
-                            //         }
-                            //     }
-                            // });
+
+
+
                         }
 
                     }
@@ -230,7 +262,7 @@ exports.detailStoreHandler = async (event, context, callback) => {
 };
 
 /**
- * Article Lambda function (Scraper)
+ * Article (Scraper)
  */
 exports.articleHandler = async (event, context, callback) => {
 
@@ -323,8 +355,8 @@ exports.articleHandler = async (event, context, callback) => {
         console.log('Scrape completed. news length: ', news.length);
 
         if (news.length > 0) {
-            // const tmpList = _.drop(news, Math.max(0, news.length-10));
-            const tmpList = news;
+            const tmpList = _.drop(news, Math.max(0, news.length-10));
+            // const tmpList = news;
 
             handlerResult = tmpList;
 
@@ -349,7 +381,8 @@ exports.articleHandler = async (event, context, callback) => {
                 console.log('listS3BucketsDirectories_success');
 
                 for (const newsObj of tmpList) {
-                    const filename = crypto.MD5(newsObj.title).toString() + '.' + fileExtension;
+                    const md5 = crypto.MD5(newsObj.title).toString();
+                    const filename = md5 + '.' + fileExtension;
                     const fullPath = s3Articles + '/' + filename;
 
                     // console.log(listBucketResult);
@@ -357,6 +390,7 @@ exports.articleHandler = async (event, context, callback) => {
                     const isFound = isFileExistInS3Bucket(listBucketResult, fullPath);
                     console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
                     if (!isFound) {
+                        newsObj.articleId = md5;
                         const newsJsonStr = JSON.stringify(newsObj);
 
                         const createObjResult = await createObjectInS3Bucket(articleBucketName, s3Articles, filename, newsJsonStr);
@@ -407,157 +441,157 @@ exports.articleHandler = async (event, context, callback) => {
 
 
 
-/*
+    /*
 
 
 
-        rp(url)
-            .then(function (html) {
-                //success!
-                console.log('Scrape completed');
+            rp(url)
+                .then(function (html) {
+                    //success!
+                    console.log('Scrape completed');
 
-                console.log('length: ', html.length);
-                // console.log($('big > a', html));
-                // console.log(html);
+                    console.log('length: ', html.length);
+                    // console.log($('big > a', html));
+                    // console.log(html);
 
-                const news = extractListFromHtml(html);
-                console.log('news_length: ', news.length);
+                    const news = extractListFromHtml(html);
+                    console.log('news_length: ', news.length);
 
-                if (news.length > 0) {
-                    // listSQSQueues()
-                    //     .then(sqsResult => {
-                    //         if (!_.isNull(sqsResult)) {
-                    //             const queueUrls = sqsResult.QueueUrls;
-                    //             if (queueUrls.length > 0) {
-                    //                 const targetQueueUrl = findSQSQueue(queueUrls, articleQueueName);
-                    //                 if (targetQueueUrl !== '') {
-                    //                     console.log('targetQueueUrl: ', targetQueueUrl);
-                    //
-                    //                     const tmpList = _.drop(news, news.length-3);
-                    //
-                    //                     // _.forEach(tmpList, (newsObj) => {
-                    //                     //     const newsObjStr = JSON.stringify(newsObj);
-                    //                     //     console.log('newsObjStr: ', newsObjStr, '\n');
-                    //                     //
-                    //                     //     addMessageToSQSQueue(targetQueueUrl, JSON.stringify(newsObjStr))
-                    //                     //         .then(result => {
-                    //                     //             console.log('result: ', result);
-                    //                     //         })
-                    //                     //         .catch(error => {
-                    //                     //             console.log('error: ', error);
-                    //                     //         });
-                    //                     //
-                    //                     // });
-                    //
-                    //                     // if (news.length > 0) {
-                    //                     //     const firstNewsObj = news[0];
-                    //                     //     const firstNewsObjStr = JSON.stringify(firstNewsObj);
-                    //                     //
-                    //                     //     console.log('firstNewsObjStr: ', firstNewsObjStr);
-                    //                     //
-                    //                     //     addMessageToSQSQueue(targetQueueUrl, JSON.stringify(firstNewsObj))
-                    //                     //         .then(result => {
-                    //                     //             console.log('result: ', result);
-                    //                     //         })
-                    //                     //         .catch(error => {
-                    //                     //             console.log('error: ', error);
-                    //                     //         });
-                    //                     // }
-                    //
-                    //
-                    //                 }
-                    //             }
-                    //         }
-                    //     })
-                    //     .catch(err => {
-                    //         console.log('listSQSQueues_error');
-                    //         console.log(err);
-                    //     });
-
-
-
-                    const tmpList = _.drop(news, Math.max(0, news.length-3));
+                    if (news.length > 0) {
+                        // listSQSQueues()
+                        //     .then(sqsResult => {
+                        //         if (!_.isNull(sqsResult)) {
+                        //             const queueUrls = sqsResult.QueueUrls;
+                        //             if (queueUrls.length > 0) {
+                        //                 const targetQueueUrl = findSQSQueue(queueUrls, articleQueueName);
+                        //                 if (targetQueueUrl !== '') {
+                        //                     console.log('targetQueueUrl: ', targetQueueUrl);
+                        //
+                        //                     const tmpList = _.drop(news, news.length-3);
+                        //
+                        //                     // _.forEach(tmpList, (newsObj) => {
+                        //                     //     const newsObjStr = JSON.stringify(newsObj);
+                        //                     //     console.log('newsObjStr: ', newsObjStr, '\n');
+                        //                     //
+                        //                     //     addMessageToSQSQueue(targetQueueUrl, JSON.stringify(newsObjStr))
+                        //                     //         .then(result => {
+                        //                     //             console.log('result: ', result);
+                        //                     //         })
+                        //                     //         .catch(error => {
+                        //                     //             console.log('error: ', error);
+                        //                     //         });
+                        //                     //
+                        //                     // });
+                        //
+                        //                     // if (news.length > 0) {
+                        //                     //     const firstNewsObj = news[0];
+                        //                     //     const firstNewsObjStr = JSON.stringify(firstNewsObj);
+                        //                     //
+                        //                     //     console.log('firstNewsObjStr: ', firstNewsObjStr);
+                        //                     //
+                        //                     //     addMessageToSQSQueue(targetQueueUrl, JSON.stringify(firstNewsObj))
+                        //                     //         .then(result => {
+                        //                     //             console.log('result: ', result);
+                        //                     //         })
+                        //                     //         .catch(error => {
+                        //                     //             console.log('error: ', error);
+                        //                     //         });
+                        //                     // }
+                        //
+                        //
+                        //                 }
+                        //             }
+                        //         }
+                        //     })
+                        //     .catch(err => {
+                        //         console.log('listSQSQueues_error');
+                        //         console.log(err);
+                        //     });
 
 
+
+                        const tmpList = _.drop(news, Math.max(0, news.length-3));
 
 
 
 
-                    // insert news into S3 (article)
-                    listS3BucketsDirectories(articleBucketName, '/' + s3Articles)
-                        .then(data => {
-                            console.log('listS3BucketsDirectories_data: ', data, '\n\n');
 
-                            for (const newsObj of tmpList) {
-                                const filename = newsObj.title + '.' + fileExtension;
-                                const fullPath = s3Articles + '/' + filename;
 
-                                const isFound = isFileExistInS3Bucket(data, fullPath);
-                                console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
-                                if (!isFound) {
-                                    const newsJsonStr = JSON.stringify(newsObj);
+                        // insert news into S3 (article)
+                        listS3BucketsDirectories(articleBucketName, '/' + s3Articles)
+                            .then(data => {
+                                console.log('listS3BucketsDirectories_data: ', data, '\n\n');
 
-                                    createObjectInS3Bucket(articleBucketName, s3Articles, filename, newsJsonStr)
-                                        .then(data => {
-                                            console.log('Create file in S3 bucket: ', filename, ' path: ', s3Articles);
-                                        })
-                                        .catch(err => {
-                                            console.log('createObjectInS3Bucket_err: ', err);
-                                        });
+                                for (const newsObj of tmpList) {
+                                    const filename = newsObj.title + '.' + fileExtension;
+                                    const fullPath = s3Articles + '/' + filename;
 
+                                    const isFound = isFileExistInS3Bucket(data, fullPath);
+                                    console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
+                                    if (!isFound) {
+                                        const newsJsonStr = JSON.stringify(newsObj);
+
+                                        createObjectInS3Bucket(articleBucketName, s3Articles, filename, newsJsonStr)
+                                            .then(data => {
+                                                console.log('Create file in S3 bucket: ', filename, ' path: ', s3Articles);
+                                            })
+                                            .catch(err => {
+                                                console.log('createObjectInS3Bucket_err: ', err);
+                                            });
+
+                                    }
                                 }
-                            }
 
 
-                        })
-                        .catch(err => {
-                            console.log('listS3BucketsDirectories_err: ', err);
-                        });
+                            })
+                            .catch(err => {
+                                console.log('listS3BucketsDirectories_err: ', err);
+                            });
 
 
 
-                    // insert news into S3 (article link)
-                    listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks)
-                        .then(data => {
-                            console.log('listS3BucketsDirectories_data: ', data, '\n\n');
+                        // insert news into S3 (article link)
+                        listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks)
+                            .then(data => {
+                                console.log('listS3BucketsDirectories_data: ', data, '\n\n');
 
-                            for (const newsObj of tmpList) {
-                                const filename = newsObj.title + '.' + fileExtension;
-                                const fullPath = s3ArticleLinks + '/' + filename;
+                                for (const newsObj of tmpList) {
+                                    const filename = newsObj.title + '.' + fileExtension;
+                                    const fullPath = s3ArticleLinks + '/' + filename;
 
-                                const isFound = isFileExistInS3Bucket(data, fullPath);
-                                console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
-                                if (!isFound) {
-                                    const newsJsonStr = JSON.stringify(newsObj);
+                                    const isFound = isFileExistInS3Bucket(data, fullPath);
+                                    console.log('isFileExistInS3Bucket: ', isFound, ' , filename: ', filename, '\n\n' );
+                                    if (!isFound) {
+                                        const newsJsonStr = JSON.stringify(newsObj);
 
-                                    createObjectInS3Bucket(articleBucketName, s3ArticleLinks, filename, newsJsonStr)
-                                        .then(data => {
-                                            console.log('Create file in S3 bucket: ', filename, ' path: ', s3ArticleLinks);
-                                        })
-                                        .catch(err => {
-                                            console.log('createObjectInS3Bucket_err: ', err);
-                                        });
+                                        createObjectInS3Bucket(articleBucketName, s3ArticleLinks, filename, newsJsonStr)
+                                            .then(data => {
+                                                console.log('Create file in S3 bucket: ', filename, ' path: ', s3ArticleLinks);
+                                            })
+                                            .catch(err => {
+                                                console.log('createObjectInS3Bucket_err: ', err);
+                                            });
 
+                                    }
                                 }
-                            }
 
-                        })
-                        .catch(err => {
-                            console.log('listS3BucketsDirectories_err: ', err);
-                        });
-
-
-                }
+                            })
+                            .catch(err => {
+                                console.log('listS3BucketsDirectories_err: ', err);
+                            });
 
 
-            })
-            .catch(function (err) {
-                //handle error
-                console.log('Scrape failure');
-                console.error(err);
-            });
+                    }
 
-        */
+
+                })
+                .catch(function (err) {
+                    //handle error
+                    console.log('Scrape failure');
+                    console.error(err);
+                });
+
+            */
 
 
 
@@ -570,7 +604,7 @@ exports.articleHandler = async (event, context, callback) => {
 };
 
 /**
- * Article Store Lambda function (Storing)
+ * Article Store (Storing)
  */
 exports.articleStoreHandler = async (event, context, callback) => {
     let handlerResult;
@@ -615,72 +649,80 @@ exports.articleStoreHandler = async (event, context, callback) => {
             for (const s3ResultObj of tmpList) {
                 // console.log(s3ResultObj.Key);
 
-                const s3DataObj = await getS3Object(articleBucketName, s3ResultObj.Key);
-                if (s3DataObj != null) {
-                    const dataStr = s3DataObj.Body.toString();
-                    const articleObj = JSON.parse(dataStr);
-                    if (!_.isNull(articleObj)) {
-                        const imgUrl = articleObj.thumbnail;
+                if (s3ResultObj.Key.indexOf(s3Articles) > -1) {
+                    const s3DataObj = await getS3Object(articleBucketName, s3ResultObj.Key);
+                    if (s3DataObj != null) {
+                        const dataStr = s3DataObj.Body.toString();
+                        const articleObj = JSON.parse(dataStr);
+                        if (!_.isNull(articleObj)) {
+                            const imgUrl = articleObj.thumbnail;
 
-                        const filename = uuidv5(imgUrl, uuidv5.URL);
-                        const ext = getExtensionFromurl(imgUrl);
-                        const filenameWithExt = filename + '.' + ext;
-                        const thumbnailUrl = s3Media + '/' + filenameWithExt;
-                        articleObj.thumbnailUrl = thumbnailUrl;
+                            const filename = uuidv5(imgUrl, uuidv5.URL);
+                            const ext = getExtensionFromurl(imgUrl);
+                            const filenameWithExt = filename + '.' + ext;
+                            const thumbnailUrl = s3Media + '/' + filenameWithExt;
+                            articleObj.thumbnailUrl = thumbnailUrl;
+                            articleObj.thumbnailFilename = filenameWithExt;
 
-                        // console.log(articleObj);
+                            // console.log(articleObj);
 
-                        const body = await fileUrlToData(imgUrl);
-                        if (body != null) {
-                            const dbObj = await findOneArticleFromDynamoDB(articleObj.title);
-                            if (_.isEmpty(dbObj)) {
+                            const body = await fileUrlToData(imgUrl);
+                            if (body != null) {
+                                // const md5 = crypto.MD5(articleObj.title).toString();
+                                const dbObj = await findOneArticleFromDynamoDB(articleObj.articleId);
+                                if (_.isEmpty(dbObj)) {
 
-                                // move json from article to article link
-                                const filename = crypto.MD5(articleObj.title).toString() + '.' + fileExtension;
-                                const srcPath = s3Articles;
-                                const destPath = s3ArticleLinks;
+                                    // move json from article to article link
+                                    // const md5 = crypto.MD5(articleObj.title).toString();
+                                    const filename = articleObj.articleId + '.' + fileExtension;
+                                    const srcPath = s3Articles;
+                                    const destPath = s3ArticleLinks;
 
-                                console.log(`Start moving file, name: ${filename} from ${srcPath} to ${destPath}`);
+                                    // articleObj.articleId = md5;
 
-                                const moveObj = await moveObjectInS3Bucket(articleBucketName, srcPath, destPath, filename);
-                                if (moveObj != null) {
-                                    console.log(`MOVE success ${filename} from ${srcPath} to ${destPath}`);
+                                    console.log(`Start moving file, name: ${filename} from ${srcPath} to ${destPath}`);
 
-                                    // save image to S3
-                                    const createMediaFileResult = await createObjectInS3Bucket(articleBucketName, s3Media, filenameWithExt, body);
-                                    if (createMediaFileResult != null) {
-                                        console.log('Create media file success: ', createMediaFileResult);
+                                    const moveObj = await moveObjectInS3Bucket(articleBucketName, srcPath, destPath, filename);
+                                    if (moveObj != null) {
+                                        console.log(`MOVE success ${filename} from ${srcPath} to ${destPath}`);
+
+                                        // save image to S3
+                                        const createMediaFileResult = await createObjectInS3Bucket(articleBucketName, s3Media, filenameWithExt, body);
+                                        if (createMediaFileResult != null) {
+                                            console.log('Create media file success: ', createMediaFileResult);
+                                        }
+                                        // console.log('createMediaFileResult: ', createMediaFileResult);
+
+                                        // insert data to db
+                                        const writeArticleResult = await writeArticleToDynamoDB(articleObj);
+                                        if (!_.isEmpty(writeArticleResult)) {
+                                            // console.log('writeArticleResult: ', writeArticleResult);
+                                            console.log('Insert new record into DynamoDB success: ', writeArticleResult);
+                                        }
+
+
                                     }
-                                    // console.log('createMediaFileResult: ', createMediaFileResult);
-
-                                    // insert data to db
-                                    const writeArticleResult = await writeArticleToDynamoDB(articleObj);
-                                    if (!_.isEmpty(writeArticleResult)) {
-                                        // console.log('writeArticleResult: ', writeArticleResult);
-                                        console.log('Insert new record into DynamoDB success: ', writeArticleResult);
-                                    }
 
 
+
+                                } else {
+                                    console.log('has record: ', JSON.stringify(dbObj));
                                 }
-
-
-
-                            } else {
-                                console.log('has record: ', JSON.stringify(dbObj));
                             }
+
+
+
+
+
+                            // console.log('dbObj123123: ', dbObj.Item.thumbnailUrl.S);
+
+                            // const aaa = await fetchItems(articleObj.title);
+                            // console.log('aaa: ', aaa);
+
+
                         }
-
-
-
-
-
-                        // console.log('dbObj123123: ', dbObj.Item.thumbnailUrl.S);
-
-                        // const aaa = await fetchItems(articleObj.title);
-                        // console.log('aaa: ', aaa);
-
-
                     }
+
                 }
 
             }
@@ -789,7 +831,7 @@ function extractListFromHtml(html) {
     return list;
 }
 
-function extractArticleDetailFromHtml(html, articleTitle) {
+function extractArticleDetailFromHtml(html, articleTitle, articleId) {
     let contents = [];
     const $ = cheerio.load(html);
 
@@ -865,6 +907,7 @@ function extractArticleDetailFromHtml(html, articleTitle) {
 
 
     const result = {
+        articleId: articleId,
         title: articleTitle,    // crypto.MD5(articleTitle).toString(),
         contents: contents
     };
@@ -977,7 +1020,7 @@ function listS3BucketsDirectories(bucketName, directory) {
         MaxKeys: 20,
         Delimiter: directory,
     };
-    return s3.listObjectsV2 (s3params).promise();
+    return s3.listObjects (s3params).promise();
 }
 
 function getS3Object(bucketName, key) {
@@ -1125,20 +1168,22 @@ function writeArticleToDynamoDB(articleObj) {
         TableName: articleTableName,
         Item: {
             // 'CUSTOMER_ID': {N: '001'},
+            'articleId': {S: articleObj.articleId},
             'title' : {S: articleObj.title},
             'thumbnailUrl' : {S: articleObj.thumbnailUrl},
+            'thumbnailFilename' : {S: articleObj.thumbnailFilename},
         }
     };
     return ddb.putItem(params).promise();
 }
 
-function findOneArticleFromDynamoDB(articleTitle) {
+function findOneArticleFromDynamoDB(articleId) {
     const params = {
         TableName : articleTableName,
         Key: {
-            'title' : {S: articleTitle},
+            'articleId' : {S: articleId},
         },
-        ProjectionExpression: 'title, thumbnailUrl'
+        ProjectionExpression: 'articleId, title, thumbnailUrl'
     };
     return ddb.getItem(params).promise();
 }
@@ -1169,7 +1214,7 @@ function updateArticleFromDynamoDB(articleTitle, newContentList) {
 }
 
 function writeArticleDetailToDynamoDB() {
-    
+
 }
 
 
