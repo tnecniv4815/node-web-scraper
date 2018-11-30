@@ -66,7 +66,7 @@ exports.articleDetailHandler = async (event, context, callback) => {
     };
 
 
-    const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleLinks);
+    const listBucketResult = await listS3BucketsDirectories(articleBucketName, s3ArticleLinks);
     if (listBucketResult != null) {
         const s3ResultList = getContentListFromBucketResult(listBucketResult);
         // console.log('listS3BucketsDirectories_success: ', listBucketResult);
@@ -97,7 +97,7 @@ exports.articleDetailHandler = async (event, context, callback) => {
                                 if (newsDetailObj.contents.length === 0) {
                                     // drop this article
                                     const filenameInArticleDetailBucket = articleId + '.' + fileExtension;
-                                    const delResult = await deleteObjectInS3Bucket(articleBucketName, s3Articles, filenameInArticleDetailBucket);
+                                    const delResult = await deleteObjectInS3BucketByPath(articleBucketName, s3Articles, filenameInArticleDetailBucket);
                                     if (delResult != null) {
                                         console.log('Deleted file in S3 bucket (Article): ', delResult);
                                     }
@@ -119,7 +119,7 @@ exports.articleDetailHandler = async (event, context, callback) => {
                                             console.log('Create file in S3 bucket (Article Detail): ', filename, ' path: ', s3ArticleDetail);
 
                                             // delete Article Link in S3 if create Article Detail success
-                                            const delResult = await deleteObjectInS3Bucket(articleBucketName, s3ResultObj.Key);
+                                            const delResult = await deleteObjectInS3BucketByKey(articleBucketName, s3ResultObj.Key);
                                             if (delResult != null) {
                                                 console.log('Deleted file in S3 bucket (Article Link): ', s3ResultObj.Key);
                                             }
@@ -181,7 +181,7 @@ exports.detailStoreHandler = async (event, context, callback) => {
     };
 
 
-    const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3ArticleDetail);
+    const listBucketResult = await listS3BucketsDirectories(articleBucketName, s3ArticleDetail);
     if (listBucketResult != null) {
         const s3ResultList = getContentListFromBucketResult(listBucketResult);
         if (!_.isNull(s3ResultList) && s3ResultList.length > 0) {
@@ -296,7 +296,7 @@ exports.detailStoreHandler = async (event, context, callback) => {
 
                                         // delete S3 Article Detail json
                                         const filenameInArticleDetailBucket = articleDetailObj.articleId + '.' + fileExtension;
-                                        const delResult = await deleteObjectInS3Bucket(articleBucketName, s3ArticleDetail, filenameInArticleDetailBucket);
+                                        const delResult = await deleteObjectInS3BucketByPath(articleBucketName, s3ArticleDetail, filenameInArticleDetailBucket);
                                         if (delResult != null) {
                                             console.log('Deleted file in S3 bucket (Article Detail): ', delResult);
                                         }
@@ -320,6 +320,8 @@ exports.detailStoreHandler = async (event, context, callback) => {
                         }
 
                     }
+                } else {
+                    console.log(`Foler NOT matched. target path: ${s3ArticleDetail} , current path: ${s3ResultObj.Key}`);
                 }
             }
 
@@ -398,7 +400,7 @@ exports.articleHandler = async (event, context, callback) => {
 
 
 
-    // deleteObjectInS3Bucket(articleBucketName, s3Articles, 'nice.json')
+    // deleteObjectInS3BucketByPath(articleBucketName, s3Articles, 'nice.json')
     //     .then(data => {
     //         console.log('deleteObjectInS3Bucket_data: ', data);
     //     })
@@ -444,7 +446,7 @@ exports.articleHandler = async (event, context, callback) => {
 
 
             // insert news into S3 (article)
-            const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3Articles);
+            const listBucketResult = await listS3BucketsDirectories(articleBucketName, s3Articles);
             if (listBucketResult != null) {
                 console.log('listS3BucketsDirectories_success');
 
@@ -705,7 +707,7 @@ exports.articleStoreHandler = async (event, context, callback) => {
 
 
 
-    const listBucketResult = await listS3BucketsDirectories(articleBucketName, '/' + s3Articles);
+    const listBucketResult = await listS3BucketsDirectories(articleBucketName, s3Articles);
     if (listBucketResult != null) {
         const s3ResultList = getContentListFromBucketResult(listBucketResult);
         if (!_.isNull(s3ResultList) && s3ResultList.length > 0) {
@@ -778,10 +780,6 @@ exports.articleStoreHandler = async (event, context, callback) => {
                                 }
                             }
 
-
-
-
-
                             // console.log('dbObj123123: ', dbObj.Item.thumbnailUrl.S);
 
                             // const aaa = await fetchItems(articleObj.title);
@@ -790,7 +788,8 @@ exports.articleStoreHandler = async (event, context, callback) => {
 
                         }
                     }
-
+                } else {
+                    console.log(`Foler NOT matched. target path: ${s3Articles} , current path: ${s3ResultObj.Key}`);
                 }
 
             }
@@ -1087,6 +1086,7 @@ function listS3BucketsDirectories(bucketName, directory) {
         Bucket: bucketName,
         MaxKeys: 20,
         Delimiter: directory,
+        Prefix: directory ,
     };
     return s3.listObjects (s3params).promise();
 }
@@ -1152,7 +1152,7 @@ function createObjectInS3Bucket(bucketName, directory, fileNameWithExt, body) {
     return s3.upload(params).promise();
 }
 
-function deleteObjectInS3Bucket(bucketName, sourcePath, fileNameWithExt) {
+function deleteObjectInS3BucketByPath(bucketName, sourcePath, fileNameWithExt) {
     return new Promise((resolve, reject) => {
         const params = {
             Bucket: bucketName,
@@ -1169,7 +1169,7 @@ function deleteObjectInS3Bucket(bucketName, sourcePath, fileNameWithExt) {
 
 }
 
-function deleteObjectInS3Bucket(bucketName, key) {
+function deleteObjectInS3BucketByKey(bucketName, key) {
     return new Promise((resolve, reject) => {
         const params = {
             Bucket: bucketName,
@@ -1199,7 +1199,7 @@ function moveObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt)
     // return new Promise((resolve, reject) => {
     //     async.series([
     //         // copyObjectInS3Bucket(bucketName, sourcePath, destPath, newFileNameWithExt),
-    //         // deleteObjectInS3Bucket(bucketName, sourcePath, newFileNameWithExt)
+    //         // deleteObjectInS3BucketByPath(bucketName, sourcePath, newFileNameWithExt)
     //         takes2Seconds(callbackhandler),
     //         takes5Seconds(callbackhandler)
     //     ], (err, result) => {
@@ -1214,7 +1214,7 @@ function moveObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt)
         const copyResult = await copyObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt);
         console.log('moveObjectInS3Bucket_copyResult: ', copyResult);
         if (copyResult != null) {
-            const delResult = await deleteObjectInS3Bucket(bucketName, sourcePath, fileNameWithExt);
+            const delResult = await deleteObjectInS3BucketByPath(bucketName, sourcePath, fileNameWithExt);
             console.log('moveObjectInS3Bucket_delResult: ', delResult);
             if (delResult != null) {
                 resolve('done');
