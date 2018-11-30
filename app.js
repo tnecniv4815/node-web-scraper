@@ -96,6 +96,11 @@ exports.articleDetailHandler = async (event, context, callback) => {
 
                                 if (newsDetailObj.contents.length === 0) {
                                     // drop this article
+                                    const filenameInArticleDetailBucket = articleId + '.' + fileExtension;
+                                    const delResult = await deleteObjectInS3Bucket(articleBucketName, s3Articles, filenameInArticleDetailBucket);
+                                    if (delResult != null) {
+                                        console.log('Deleted file in S3 bucket (Article): ', delResult);
+                                    }
                                 } else if (newsDetailObj.contents.length > 0) {
                                     handlerResult = newsDetailObj;
 
@@ -205,6 +210,7 @@ exports.detailStoreHandler = async (event, context, callback) => {
                             // }
 
 
+                            let articleDetailList = [];
                             let tmpArticleDetailIdList = [];
                             _.forEach(detailObj.contents, (content) => {
 
@@ -213,8 +219,16 @@ exports.detailStoreHandler = async (event, context, callback) => {
                                 switch (content.type) {
                                     case ARTICLE_CONTENT_TYPE.TEXT: {
                                         articleDetailId = crypto.MD5(content.content).toString();
-                                        const message = articleDetailId;
+                                        const message = content.content;
 
+                                        //
+                                        const item = {
+                                            id: articleDetailId,
+                                            articleId: detailObj.articleId,
+                                            type: content.type,
+                                            content: message
+                                        };
+                                        articleDetailList.push(item);
 
                                         break;
                                     }
@@ -228,23 +242,77 @@ exports.detailStoreHandler = async (event, context, callback) => {
                                         const finalImgUrl = s3Media + '/' + filenameWithExt;
                                         articleDetailId = filename;
 
+                                        //
+                                        const item = {
+                                            id: articleDetailId,
+                                            articleId: detailObj.articleId,
+                                            type: content.type,
+                                            content: finalImgUrl,
+
+                                            imgUrl: imgUrl,
+                                            filename: filenameWithExt,
+                                        };
+                                        articleDetailList.push(item);
+
                                         break;
                                     }
                                 }
 
-                                if (articleDetailId !== '') {
-                                    tmpArticleDetailIdList.push(articleDetailId);
-                                }
+                                // if (articleDetailId !== '') {
+                                //     tmpArticleDetailIdList.push(articleDetailId);
+                                // }
 
                             });
 
+                            if (articleDetailList.length > 0) {
+                                _.forEach(articleDetailList, async (articleDetailObj) => {
+                                    const batchInsertArticleDetailResult = await batchWriteArticleDetailToDynamoDB(articleDetailTableName, articleDetailObj);
+                                    if (batchInsertArticleDetailResult != null) {
+                                        // console.log(`batchInsertArticleDetailResult: ${batchInsertArticleDetailResult}`);
+
+                                        // update article contents record
+                                        tmpArticleDetailIdList.push(articleDetailObj.id);
+
+                                        const updateArticleResult = await updateArticleFromDynamoDB(articleDetailObj.articleId, tmpArticleDetailIdList);
+                                        if (updateArticleResult != null) {
+                                            console.log(`Update Article file success. articleId: ${articleDetailObj.articleId} , contents: ${ JSON.stringify(tmpArticleDetailIdList) }`);
+                                        }
 
 
-                            // update content list to article table
-                            const dbObj = await findOneArticleFromDynamoDB(detailObj.articleId);
-                            if (_.isEmpty(dbObj)) {
-                                console.log(`dbObj: ${dbObj}`);
+                                        // save image to S3 media bucket if image
+                                        switch (articleDetailObj.type) {
+                                            case ARTICLE_CONTENT_TYPE.IMAGE: {
+                                                const body = await fileUrlToData(articleDetailObj.imgUrl);
+                                                if (body != null) {
+                                                    const createMediaFileResult = await createObjectInS3Bucket(articleBucketName, s3Media, articleDetailObj.filename, body);
+                                                    if (createMediaFileResult != null) {
+                                                        console.log(`Create media file success. `, createMediaFileResult);
+                                                    }
+                                                }
+
+                                                break;
+                                            }
+                                        }
+
+                                        // delete S3 Article Detail json
+                                        const filenameInArticleDetailBucket = articleDetailObj.articleId + '.' + fileExtension;
+                                        const delResult = await deleteObjectInS3Bucket(articleBucketName, s3ArticleDetail, filenameInArticleDetailBucket);
+                                        if (delResult != null) {
+                                            console.log('Deleted file in S3 bucket (Article Detail): ', delResult);
+                                        }
+
+                                    }
+                                });
+
+
+                                // update content list to article table
+                                const dbObj = await findOneArticleFromDynamoDB(detailObj.articleId);
+                                if (_.isEmpty(dbObj)) {
+                                    console.log(`dbObj: ${dbObj}`);
+                                }
                             }
+
+
 
 
 
@@ -644,7 +712,7 @@ exports.articleStoreHandler = async (event, context, callback) => {
             console.log('s3ResultList: ', s3ResultList.length);
             // console.log('s3ResultList: ', s3ResultList);
 
-            const tmpList = trimResultList(s3ResultList, 3);
+            const tmpList = trimResultList(s3ResultList, 8);
 
             for (const s3ResultObj of tmpList) {
                 // console.log(s3ResultObj.Key);
@@ -1085,19 +1153,36 @@ function createObjectInS3Bucket(bucketName, directory, fileNameWithExt, body) {
 }
 
 function deleteObjectInS3Bucket(bucketName, sourcePath, fileNameWithExt) {
-    const params = {
-        Bucket: bucketName,
-        Key: sourcePath + '/' + fileNameWithExt
-    };
-    return s3.deleteObject(params).promise();
+    return new Promise((resolve, reject) => {
+        const params = {
+            Bucket: bucketName,
+            Key: sourcePath + '/' + fileNameWithExt
+        };
+        s3.deleteObject(params, (err, data) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(data);
+            }
+        });
+    });
+
 }
 
 function deleteObjectInS3Bucket(bucketName, key) {
-    const params = {
-        Bucket: bucketName,
-        Key: key
-    };
-    return s3.deleteObject(params).promise();
+    return new Promise((resolve, reject) => {
+        const params = {
+            Bucket: bucketName,
+            Key: key
+        };
+        s3.deleteObject(params, (err, data) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(data);
+            }
+        });
+    });
 }
 
 function copyObjectInS3Bucket(bucketName, sourcePath, destPath, fileNameWithExt) {
@@ -1188,16 +1273,16 @@ function findOneArticleFromDynamoDB(articleId) {
     return ddb.getItem(params).promise();
 }
 
-function updateArticleFromDynamoDB(articleTitle, newContentList) {
+function updateArticleFromDynamoDB(articleId, newContentList) {
     const params = {
         TableName: articleTableName,
         Key:{
-            'title': articleTitle
+            'articleId': articleId
         },
-        UpdateExpression: "set contents = :c, articl info.rating = :r, info.plot=:p, info.actors=:a",
+        UpdateExpression: 'set contents = :c',
         ExpressionAttributeValues:{
-            ":r":5.5,
-            ":p":"Everything happens all at once.",
+            // ":r":5.5,
+            // ":p":"Everything happens all at once.",
             ":c": newContentList
         },
         ReturnValues:"UPDATED_NEW"
@@ -1213,8 +1298,93 @@ function updateArticleFromDynamoDB(articleTitle, newContentList) {
     return docClient.update(params).promise();
 }
 
-function writeArticleDetailToDynamoDB() {
+function batchWriteArticleDetailToDynamoDB(tableName, articleDetailObj) {
+    return new Promise((resolve, reject) => {
+        // let list = [];
+        //
+        // _.forEach(articleDetailList, (articleDetailObj) => {
+        //     const object = {
+        //         PutRequest: {
+        //             Item: {
+        //                 'id': { "S": articleDetailObj.id },
+        //                 "articleId": { "S": articleDetailObj.articleId },
+        //                 "type": { "N": ''+articleDetailObj.type },
+        //                 "content": { "S": articleDetailObj.content },
+        //             }
+        //         }
+        //     };
+        //     list.push(object);
+        //
+        // });
+        //
+        // // detail
+        // // id, articleId, type, content
+        //
+        // // const params = {
+        // //     RequestItems: {
+        // //         "TABLE_NAME": [
+        // //             {
+        // //                 PutRequest: {
+        // //                     Item: {
+        // //                         "KEY": { "N": "KEY_VALUE" },
+        // //                         "ATTRIBUTE_1": { "S": "ATTRIBUTE_1_VALUE" },
+        // //                         "ATTRIBUTE_2": { "N": "ATTRIBUTE_2_VALUE" }
+        // //                     }
+        // //                 }
+        // //             },
+        // //             {
+        // //                 PutRequest: {
+        // //                     Item: {
+        // //                         "KEY": { "N": "KEY_VALUE" },
+        // //                         "ATTRIBUTE_1": { "S": "ATTRIBUTE_1_VALUE" },
+        // //                         "ATTRIBUTE_2": { "N": "ATTRIBUTE_2_VALUE" }
+        // //                     }
+        // //                 }
+        // //             }
+        // //         ]
+        // //     }
+        // // };
+        //
+        // const params = {
+        //     RequestItems: {
+        //         'articleDetail': list
+        //     }
+        // };
+        //
+        // ddb.batchWriteItem(params, function(err, data) {
+        //     if (err) {
+        //         console.log("Error", err);
+        //         reject(err);
+        //     } else {
+        //         console.log("Success", data);
+        //         resolve(data);
+        //     }
+        // });
 
+
+        const params = {
+            TableName: tableName,
+            Item: {
+                'id': { "S": articleDetailObj.id },
+                "articleId": { "S": articleDetailObj.articleId },
+                "type": { "N": ''+articleDetailObj.type },
+                "content": { "S": articleDetailObj.content },
+            }
+        };
+
+        ddb.putItem(params, function(err, data) {
+            if (err) {
+                console.log("Error", err);
+                reject(err);
+            } else {
+                console.log("Success", data);
+                resolve(data);
+            }
+        });
+
+
+
+    });
 }
 
 

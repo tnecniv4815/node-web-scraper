@@ -6,9 +6,9 @@ let data;
 
 
 // data = app.articleHandler({});
-// data = app.articleStoreHandler({});
+data = app.articleStoreHandler({});
 // data = app.articleDetailHandler({});
-data = app.detailStoreHandler({});
+// data = app.detailStoreHandler({});
 
 
 console.log('data: ', JSON.stringify(data));
