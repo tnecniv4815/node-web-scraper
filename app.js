@@ -34,6 +34,10 @@ const articleQueueName = 'ArticleQueue';
 const articleTableName = 'article';
 const articleDetailTableName = 'articleDetail';
 
+// date format
+const DATE_FORMAT_1 = 'YYYY-MM-DD_HH:mm:ss';
+
+
 // AWS
 const sqs = new AWS.SQS({
     region: region
@@ -805,9 +809,9 @@ exports.articleStoreHandler = async (event, context, callback) => {
 /**
  * Common
  */
-function getCurrentTime() {
-    const dateFormat = 'yyyy-mm-dd_hh:mm:ss';
-    const datetime = moment().format(dateFormat);
+function getCurrentTime(format) {
+    const dateFormat = 'YYYY-MM-DD_HH:mm:ss';
+    const datetime = moment().format(format);
 
     return datetime;
 }
@@ -1257,6 +1261,7 @@ function writeArticleToDynamoDB(articleObj) {
             'title' : {S: articleObj.title},
             'thumbnailUrl' : {S: articleObj.thumbnailUrl},
             'thumbnailFilename' : {S: articleObj.thumbnailFilename},
+            'created_at' : {S: ''+ getCurrentTime(DATE_FORMAT_1) },
         }
     };
     return ddb.putItem(params).promise();
@@ -1369,6 +1374,7 @@ function batchWriteArticleDetailToDynamoDB(tableName, articleDetailObj) {
                 "articleId": { "S": articleDetailObj.articleId },
                 "type": { "N": ''+articleDetailObj.type },
                 "content": { "S": articleDetailObj.content },
+                'created_at' : {S: ''+ getCurrentTime(DATE_FORMAT_1) },
             }
         };
 
