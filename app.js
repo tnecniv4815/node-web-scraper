@@ -1372,7 +1372,7 @@ function batchWriteArticleDetailToDynamoDB(tableName, articleDetailObj) {
             Item: {
                 'id': { "S": articleDetailObj.id },
                 "articleId": { "S": articleDetailObj.articleId },
-                "type": { "N": ''+articleDetailObj.type },
+                "contentType": { "N": ''+articleDetailObj.type },
                 "content": { "S": articleDetailObj.content },
                 'created_at' : {S: ''+ getCurrentTime(DATE_FORMAT_1) },
             }
